@@ -2,6 +2,7 @@ import { SignJWT, jwtVerify } from "jose";
 import { cookies } from "next/headers";
 import type { RoleCode, UserStatus } from "@prisma/client";
 import { SESSION_COOKIE } from "@/lib/constants";
+import { authSecretBytes, sessionCookieOptions, sessionMaxAgeSeconds } from "@/lib/auth/cookie";
 
 export type SessionUser = {
   id: string;
@@ -16,22 +17,14 @@ export type SessionUser = {
 };
 
 function secret() {
-  const value = process.env.AUTH_SECRET;
-  if (!value) {
-    throw new Error("AUTH_SECRET no está configurado.");
-  }
-  return new TextEncoder().encode(value);
-}
-
-function sessionDays() {
-  return Number(process.env.AUTH_SESSION_DAYS ?? 7);
+  return authSecretBytes();
 }
 
 export async function signSession(user: SessionUser) {
   return new SignJWT(user)
     .setProtectedHeader({ alg: "HS256" })
     .setIssuedAt()
-    .setExpirationTime(`${sessionDays()}d`)
+    .setExpirationTime(`${Math.max(1, Math.round(sessionMaxAgeSeconds() / 86400))}d`)
     .setSubject(user.id)
     .sign(secret());
 }
@@ -66,12 +59,14 @@ export async function getSession(): Promise<SessionUser | null> {
 export async function setSessionCookie(user: SessionUser) {
   const token = await signSession(user);
   const store = await cookies();
+  const options = sessionCookieOptions();
   store.set(SESSION_COOKIE, token, {
-    httpOnly: true,
-    sameSite: "lax",
-    secure: process.env.NODE_ENV === "production",
-    path: "/",
-    maxAge: sessionDays() * 24 * 60 * 60,
+    httpOnly: options.httpOnly,
+    path: options.path,
+    maxAge: options.maxAge,
+    secure: options.secure,
+    sameSite: options.sameSite,
+    ...(options.partitioned ? { partitioned: true } : {}),
   });
 }
 

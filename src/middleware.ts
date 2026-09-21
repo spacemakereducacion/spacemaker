@@ -3,9 +3,10 @@ import { jwtVerify } from "jose";
 import { SESSION_COOKIE } from "@/lib/constants";
 import { defaultHome, isStaffRole, roleHasPermission, type Permission } from "@/lib/rbac/permissions";
 import type { RoleCode } from "@prisma/client";
+import { authSecretBytes } from "@/lib/auth/cookie";
 
 function secret() {
-  return new TextEncoder().encode(process.env.AUTH_SECRET ?? "");
+  return authSecretBytes();
 }
 
 const routePermissions: Array<{ prefix: string; permission: Permission }> = [
@@ -41,7 +42,7 @@ const routePermissions: Array<{ prefix: string; permission: Permission }> = [
 
 export async function middleware(request: NextRequest) {
   const { pathname } = request.nextUrl;
-  const publicPaths = ["/login", "/recuperar", "/restablecer", "/verificar", "/api/health"];
+  const publicPaths = ["/login", "/recuperar", "/restablecer", "/verificar", "/api/health", "/api/auth/login"];
   if (publicPaths.some((path) => pathname === path || pathname.startsWith(`${path}/`))) {
     return NextResponse.next();
   }
