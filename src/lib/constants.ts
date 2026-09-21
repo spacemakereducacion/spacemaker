@@ -1,5 +1,11 @@
 export const APP_NAME = "Space Maker Educación";
 export const SESSION_COOKIE = "sm_session";
+/** CHIPS cookie for HTTPS iframes (Cursor Demo and other previews). */
+export const SESSION_COOKIE_CHIPS = "sm_session_ch";
+/** Non-httpOnly backup set from the login page when document.cookie is allowed. */
+export const SESSION_COOKIE_JS = "sm_session_js";
+/** One-time session handoff query param used when Set-Cookie on redirects is dropped. */
+export const SESSION_HANDOFF_PARAM = "sm";
 
 export const DEMO_NOTICE =
   "Datos DEMO de Space Maker Educación. No corresponden a personas reales.";

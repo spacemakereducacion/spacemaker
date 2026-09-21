@@ -25,6 +25,9 @@ export function loginRateLimitKey(ip: string, email: string) {
  * Production multi-instance deployments should replace this with Redis.
  */
 export function loginLimit(ip: string, email: string) {
+  if (process.env.DEMO_LOGIN === "true") {
+    return { ok: true, remaining: 999 };
+  }
   const max = Number(process.env.RATE_LIMIT_LOGIN_MAX ?? 8);
   const windowMs = Number(process.env.RATE_LIMIT_LOGIN_WINDOW_SECONDS ?? 300) * 1000;
   return rateLimit(loginRateLimitKey(ip, email), max, windowMs);

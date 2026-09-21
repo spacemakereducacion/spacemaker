@@ -1,8 +1,12 @@
 import { SignJWT, jwtVerify } from "jose";
-import { cookies } from "next/headers";
+import { cookies, headers } from "next/headers";
 import type { RoleCode, UserStatus } from "@prisma/client";
-import { SESSION_COOKIE } from "@/lib/constants";
-import { authSecretBytes, sessionCookieOptions, sessionMaxAgeSeconds } from "@/lib/auth/cookie";
+import { SESSION_COOKIE, SESSION_COOKIE_CHIPS, SESSION_COOKIE_JS } from "@/lib/constants";
+import {
+  authSecretBytes,
+  browserIsHttps,
+  sessionMaxAgeSeconds,
+} from "@/lib/auth/cookie";
 
 export type SessionUser = {
   id: string;
@@ -21,7 +25,17 @@ function secret() {
 }
 
 export async function signSession(user: SessionUser) {
-  return new SignJWT(user)
+  return new SignJWT({
+    id: user.id,
+    email: user.email,
+    firstName: user.firstName,
+    lastName: user.lastName,
+    role: user.role,
+    institutionId: user.institutionId,
+    campusId: user.campusId,
+    photoUrl: user.photoUrl,
+    status: user.status,
+  })
     .setProtectedHeader({ alg: "HS256" })
     .setIssuedAt()
     .setExpirationTime(`${Math.max(1, Math.round(sessionMaxAgeSeconds() / 86400))}d`)
@@ -49,30 +63,75 @@ export async function verifySessionToken(token: string): Promise<SessionUser | n
   }
 }
 
-export async function getSession(): Promise<SessionUser | null> {
+async function tokenFromRequestStore() {
   const store = await cookies();
-  const token = store.get(SESSION_COOKIE)?.value;
+  const raw =
+    store.get(SESSION_COOKIE)?.value ||
+    store.get(SESSION_COOKIE_CHIPS)?.value ||
+    store.get(SESSION_COOKIE_JS)?.value;
+  if (raw) {
+    try {
+      return decodeURIComponent(raw);
+    } catch {
+      return raw;
+    }
+  }
+  const list = await headers();
+  return list.get("x-sm-session");
+}
+
+export async function getSession(): Promise<SessionUser | null> {
+  const token = await tokenFromRequestStore();
   if (!token) return null;
   return verifySessionToken(token);
+}
+
+async function cookieRequestHint(): Promise<Request | undefined> {
+  try {
+    const list = await headers();
+    const proto = list.get("x-forwarded-proto")?.split(",")[0]?.trim() || "http";
+    const host = list.get("x-forwarded-host") || list.get("host") || "localhost";
+    return new Request(`${proto}://${host}/`, { headers: list });
+  } catch {
+    return undefined;
+  }
 }
 
 export async function setSessionCookie(user: SessionUser) {
   const token = await signSession(user);
   const store = await cookies();
-  const options = sessionCookieOptions();
+  const maxAge = sessionMaxAgeSeconds();
+  const request = await cookieRequestHint();
+  const https = browserIsHttps(request);
   store.set(SESSION_COOKIE, token, {
-    httpOnly: options.httpOnly,
-    path: options.path,
-    maxAge: options.maxAge,
-    secure: options.secure,
-    sameSite: options.sameSite,
-    ...(options.partitioned ? { partitioned: true } : {}),
+    httpOnly: true,
+    path: "/",
+    maxAge,
+    secure: https,
+    sameSite: "lax",
+  });
+  store.set(SESSION_COOKIE_CHIPS, token, {
+    httpOnly: true,
+    path: "/",
+    maxAge,
+    secure: true,
+    sameSite: "none",
+    partitioned: true,
   });
 }
 
 export async function clearSessionCookie() {
   const store = await cookies();
-  store.delete(SESSION_COOKIE);
+  store.set(SESSION_COOKIE, "", { path: "/", maxAge: 0, httpOnly: true, sameSite: "lax" });
+  store.set(SESSION_COOKIE_CHIPS, "", {
+    path: "/",
+    maxAge: 0,
+    httpOnly: true,
+    sameSite: "none",
+    secure: true,
+    partitioned: true,
+  });
+  store.set(SESSION_COOKIE_JS, "", { path: "/", maxAge: 0 });
 }
 
 export function toSessionUser(user: {

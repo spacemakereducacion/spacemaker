@@ -1,12 +1,23 @@
 import { NextResponse, type NextRequest } from "next/server";
 import { jwtVerify } from "jose";
-import { SESSION_COOKIE } from "@/lib/constants";
+import {
+  SESSION_COOKIE,
+  SESSION_COOKIE_CHIPS,
+  SESSION_COOKIE_JS,
+} from "@/lib/constants";
 import { defaultHome, isStaffRole, roleHasPermission, type Permission } from "@/lib/rbac/permissions";
 import type { RoleCode } from "@prisma/client";
-import { authSecretBytes } from "@/lib/auth/cookie";
+import { attachSessionCookies, authSecretBytes, readSessionToken, withSessionHandoff } from "@/lib/auth/cookie";
 
 function secret() {
   return authSecretBytes();
+}
+
+function redirectTo(path: string) {
+  return new NextResponse(null, {
+    status: 303,
+    headers: { Location: path },
+  });
 }
 
 const routePermissions: Array<{ prefix: string; permission: Permission }> = [
@@ -50,31 +61,54 @@ export async function middleware(request: NextRequest) {
     return NextResponse.next();
   }
 
-  const token = request.cookies.get(SESSION_COOKIE)?.value;
+  const token = readSessionToken({
+    cookie: (name) => request.cookies.get(name)?.value,
+    searchParam: (name) => request.nextUrl.searchParams.get(name) ?? undefined,
+  });
+
   if (!token) {
-    if (pathname === "/") return NextResponse.redirect(new URL("/login", request.url));
-    const login = new URL("/login", request.url);
-    login.searchParams.set("next", pathname);
-    return NextResponse.redirect(login);
+    if (pathname === "/") return redirectTo("/login");
+    return redirectTo(`/login?next=${encodeURIComponent(pathname)}`);
   }
 
   try {
     const { payload } = await jwtVerify(token, secret());
     const role = payload.role as RoleCode;
+    const requestHeaders = new Headers(request.headers);
+    requestHeaders.delete("x-sm-session");
+    requestHeaders.set("x-sm-session", token);
+
+    const continueWithSession = (dest?: string) => {
+      if (dest) {
+        const response = redirectTo(withSessionHandoff(dest, token));
+        attachSessionCookies(response.headers, token, request);
+        return response;
+      }
+      const response = NextResponse.next({ request: { headers: requestHeaders } });
+      attachSessionCookies(response.headers, token, request);
+      return response;
+    };
+
     if (pathname === "/") {
-      return NextResponse.redirect(new URL(defaultHome(role), request.url));
+      return continueWithSession(defaultHome(role));
     }
     if (pathname.startsWith("/app") && !isStaffRole(role)) {
-      return NextResponse.redirect(new URL(defaultHome(role), request.url));
+      return continueWithSession(defaultHome(role));
     }
     const match = routePermissions.find((item) => pathname === item.prefix || pathname.startsWith(`${item.prefix}/`));
     if (match && !roleHasPermission(role, match.permission)) {
-      return NextResponse.redirect(new URL(defaultHome(role), request.url));
+      return continueWithSession(defaultHome(role));
     }
-    return NextResponse.next();
+    return continueWithSession();
   } catch {
-    const login = new URL("/login", request.url);
-    return NextResponse.redirect(login);
+    const login = redirectTo("/login");
+    login.headers.append("Set-Cookie", `${SESSION_COOKIE}=; Path=/; Max-Age=0; HttpOnly; SameSite=Lax`);
+    login.headers.append(
+      "Set-Cookie",
+      `${SESSION_COOKIE_CHIPS}=; Path=/; Max-Age=0; HttpOnly; SameSite=None; Secure; Partitioned`,
+    );
+    login.headers.append("Set-Cookie", `${SESSION_COOKIE_JS}=; Path=/; Max-Age=0; SameSite=Lax`);
+    return login;
   }
 }
 
