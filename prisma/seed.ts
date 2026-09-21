@@ -1,3 +1,4 @@
+import "dotenv/config";
 import {
   PrismaClient,
   RoleCode,
@@ -9,6 +10,10 @@ import {
   CollectionStatus,
 } from "@prisma/client";
 import bcrypt from "bcryptjs";
+
+if (!process.env.DATABASE_URL) {
+  throw new Error("DATABASE_URL no está definido. Copie .env.example a .env y apúntelo a PostgreSQL.");
+}
 
 const db = new PrismaClient();
 const DEMO_PASSWORD = process.env.DEMO_PASSWORD ?? "Demo.2026!";
